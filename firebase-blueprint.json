@@ -1,0 +1,75 @@
+{
+  "entities": {
+    "Shop": {
+      "title": "Shop",
+      "description": "Represents a store.",
+      "type": "object",
+      "properties": {
+        "owner_id": { "type": "string" },
+        "shop_name": { "type": "string" },
+        "slug": { "type": "string" },
+        "logo_url": { "type": "string" },
+        "jazzcash_number": { "type": "string" },
+        "owner_whatsapp": { "type": "string" },
+        "delivery_charges": { "type": "number" },
+        "welcome_msg": { "type": "string" },
+        "is_open": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "timestamp" },
+        "updatedAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["owner_id", "shop_name", "slug", "createdAt", "updatedAt"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "A product available in a shop.",
+      "type": "object",
+      "properties": {
+        "shop_id": { "type": "string" },
+        "name": { "type": "string" },
+        "price": { "type": "number" },
+        "image_url": { "type": "string" },
+        "category": { "type": "string" },
+        "variants": { 
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "is_active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "timestamp" },
+        "updatedAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["shop_id", "name", "price", "is_active", "createdAt", "updatedAt"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "An order placed by a customer.",
+      "type": "object",
+      "properties": {
+        "shop_id": { "type": "string" },
+        "customer_name": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "items_json": { "type": "string" },
+        "total_amount": { "type": "number" },
+        "status": { "type": "string" },
+        "payment_screenshot": { "type": "string" },
+        "createdAt": { "type": "string", "format": "timestamp" },
+        "updatedAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["shop_id", "customer_name", "phone", "items_json", "total_amount", "status", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/shops/{shopId}": {
+      "schema": { "$ref": "#/entities/Shop" },
+      "description": "Shops collection"
+    },
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Products per shop. Alternatively, we could have it as a subcollection, but instructions said /products/{productId}"
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "Orders placed at a shop"
+    }
+  }
+}
