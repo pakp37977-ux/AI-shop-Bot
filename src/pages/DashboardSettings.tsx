@@ -20,6 +20,12 @@ export default function DashboardSettings() {
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
+  // Auto-generate slug from shopName
+  const updateSlug = (name: string) => {
+    const generatedSlug = name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    setSlug(generatedSlug);
+  };
+
   useEffect(() => {
     const fetchSettings = async () => {
       try {
@@ -53,6 +59,10 @@ export default function DashboardSettings() {
     
     if (!shopName || !shopName.trim()) {
       setErrorMsg("Please enter a Shop Name.");
+      return;
+    }
+    if (!slug || !slug.trim()) {
+      setErrorMsg("Please add shop name to generate link.");
       return;
     }
     if (!whatsapp || !whatsapp.trim()) {
@@ -99,6 +109,7 @@ export default function DashboardSettings() {
 
       await setDoc(doc(db, 'shops', auth.currentUser.uid), {
         shop_name: shopName,
+        slug: slug,
         logo_url: newLogoUrl,
         jazzcash_number: jazzcash,
         owner_whatsapp: whatsapp,
@@ -108,7 +119,7 @@ export default function DashboardSettings() {
         updatedAt: new Date().toISOString()
       }, { merge: true });
       setLogoFile(null);
-      setSuccessMsg('Settings saved successfully!');
+      setSuccessMsg('Settings saved and shop activated successfully!');
     } catch (error: any) {
       try {
         handleFirestoreError(error, OperationType.UPDATE, `shops/${auth.currentUser?.uid}`);
@@ -162,11 +173,11 @@ export default function DashboardSettings() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Shop Name</label>
-            <input type="text" className="w-full px-4 py-2 border rounded-md" value={shopName} onChange={e => setShopName(e.target.value)} />
+            <input type="text" className="w-full px-4 py-2 border rounded-md" value={shopName} onChange={e => { setShopName(e.target.value); if (!slug) updateSlug(e.target.value); }} />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Shop URL Slug (Read-only)</label>
-            <input type="text" readOnly className="w-full px-4 py-2 border rounded-md bg-gray-50 text-gray-500" value={slug} />
+            <label className="block text-sm font-medium text-gray-700 mb-1">Shop URL Slug</label>
+            <input type="text" className="w-full px-4 py-2 border rounded-md" value={slug} onChange={e => setSlug(e.target.value)} placeholder="e.g. your-shop-name" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Your WhatsApp Number (Owner)</label>
@@ -195,7 +206,7 @@ export default function DashboardSettings() {
 
         <div className="pt-4 border-t mt-2">
           <button type="submit" disabled={saving} className="bg-green-600 text-white px-8 py-3 rounded-md font-medium hover:bg-green-700 disabled:opacity-50">
-            {saving ? 'Saving...' : 'Save Settings'}
+            {saving ? 'Saving...' : 'Save & Activate Shop'}
           </button>
         </div>
       </form>
