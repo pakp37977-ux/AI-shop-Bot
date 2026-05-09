@@ -1,6 +1,6 @@
 {
-  "name": "AI Shop Bot",
-  "description": "",
+  "name": "AI Bot Shop",
+  "description": "Complete WhatsApp Food Ordering System with Admin Panel. Built with Next.js 14 + Firebase + Cloudinary. Features: Menu management, JazzCash payment integration, Real-time order tracking, Public shop link, No WhatsApp API needed. Ready for 1-day delivery.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }
