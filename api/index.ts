@@ -3,63 +3,104 @@ import { initializeApp, getApp, getApps } from 'firebase/app';
 import { getFirestore, collection, query, where, getDocs } from 'firebase/firestore';
 import Groq from "groq-sdk";
 import { HfInference } from "@huggingface/inference";
-import firebaseConfig from '../firebase-applet-config.json';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Constants
+const PORT = process.env.PORT || 3000;
+
+// Initialize Express
 const app = express();
 app.use(express.json());
 
-// Initialize Firebase in serverless context safely
-let db: any;
+// Debug logging
+app.use((req, res, next) => {
+  console.log(`[API LOG] ${req.method} ${req.url}`);
+  next();
+});
+
+// Load config safely
+let firebaseConfig: any = {};
 try {
-  const firebaseApp = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-  db = getFirestore(firebaseApp, (firebaseConfig as any).firestoreDatabaseId);
+  const configPath = path.resolve(__dirname, '../firebase-applet-config.json');
+  if (fs.existsSync(configPath)) {
+    firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } else {
+    console.warn("firebase-applet-config.json not found at", configPath);
+  }
 } catch (e) {
-  console.error("Firebase init error in API:", e);
+  console.error("Error loading firebase config:", e);
 }
+
+// Initialize Firebase
+let db: any;
+if (firebaseConfig && firebaseConfig.projectId) {
+  try {
+    const firebaseApp = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+    db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+  } catch (e) {
+    console.error("Firebase initialization failed:", e);
+  }
+}
+
+// Helper to get API Key robustly
+const getApiKey = (prefix: string) => {
+  let key = process.env[`${prefix}_API_KEY`] || process.env[`VITE_${prefix}_API_KEY`] || process.env[prefix];
+  
+  // Fallback to searching all env keys
+  if (!key || key === "AI Studio Free Tier") {
+    for (const [k, v] of Object.entries(process.env)) {
+      if (k.toUpperCase().includes(prefix.toUpperCase()) && v && v !== "AI Studio Free Tier") {
+        key = v as string;
+        break;
+      }
+    }
+  }
+
+  if (key) {
+    key = key.replace(/["']/g, '').trim();
+  }
+  return (key && key !== "AI Studio Free Tier" && key !== "undefined") ? key : null;
+};
 
 const router = express.Router();
 
-// Health check with debugging info
+// Health check
 router.get("/health", (req, res) => {
-  res.json({ 
-    status: "ok", 
+  res.json({
+    status: "ok",
     timestamp: new Date().toISOString(),
+    configLoaded: !!firebaseConfig.projectId,
+    dbInited: !!db,
     env: {
-      has_groq: !!(process.env.GROQ_API_KEY || process.env.VITE_GROQ_API_KEY),
-      has_hf: !!(process.env.HUGGINGFACE_TOKEN || process.env.VITE_HUGGINGFACE_TOKEN)
+      has_groq: !!getApiKey('GROQ'),
+      has_hf: !!getApiKey('HUGGINGFACE') || !!getApiKey('HF')
     }
   });
 });
 
-// API route for AI Image generation
+// AI Image Generation
 router.post("/generate-image", async (req, res) => {
   try {
     const { productName, category } = req.body;
-    let token = process.env.HUGGINGFACE_TOKEN || process.env.VITE_HUGGINGFACE_TOKEN;
-    
-    // Search for any key containing huggingface if the standard one is missing
-    if (!token || token === "AI Studio Free Tier") {
-        for (const [key, value] of Object.entries(process.env)) {
-            if (key.toLowerCase().includes('huggingface') && value && value !== "AI Studio Free Tier") {
-                token = value;
-                break;
-            }
-        }
-    }
+    const token = getApiKey('HUGGINGFACE') || getApiKey('HF');
 
-    if (token) {
-        token = token.replace(/["']/g, '').trim();
-    }
-
-    if (!token || token === "AI Studio Free Tier" || token === "undefined") {
-      return res.status(500).json({ error: "HuggingFace Token is missing." });
+    if (!token) {
+      return res.status(500).json({ error: "HuggingFace Token is missing. Please set HUGGINGFACE_TOKEN in settings." });
     }
 
     const hf = new HfInference(token);
-    const prompt = `Hyper-realistic, high-quality professional product food photography of ${productName} ${category ? "in " + category : ""}. trending on instagram, appetizing, studio lighting, bokeh background.`;
+    const prompt = `Hyper-realistic, high-quality professional product food photography of ${productName} ${category ? "in " + category : ""}. appetizing, studio lighting, bokeh background.`;
+    
+    // Use FLUX.1-schnell which is usually more accessible for free tokens
+    const model = 'black-forest-labs/FLUX.1-schnell';
     
     const imageBlob = await hf.textToImage({
-      model: 'black-forest-labs/FLUX.1-dev',
+      model: model,
       inputs: prompt,
       parameters: {
         negative_prompt: 'deformed, blurry, bad anatomy, text, watermark, low quality',
@@ -68,71 +109,54 @@ router.post("/generate-image", async (req, res) => {
 
     const imageBuffer = await (imageBlob as unknown as Blob).arrayBuffer();
     const base64Image = Buffer.from(imageBuffer).toString('base64');
-    const imageUrl = `data:image/jpeg;base64,${base64Image}`;
-
-    res.json({ imageUrl });
+    res.json({ imageUrl: `data:image/jpeg;base64,${base64Image}` });
   } catch (err: any) {
-    console.error("AI Image Generation Error:", err);
-    res.status(500).json({ error: "Image generation failed: " + err.message });
+    console.error("Image Generation Error:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// API route for Chat (using Groq)
+// Chat Bot
 router.post("/chat", async (req, res) => {
   try {
     const { message, history, shop, products: providedProducts } = req.body;
-    
-    let apiKey = process.env.GROQ_API_KEY || process.env.VITE_GROQ_API_KEY;
-    if (!apiKey || apiKey === "AI Studio Free Tier") {
-        for (const [key, value] of Object.entries(process.env)) {
-            if (key.toLowerCase().includes('groq') && value && value !== "AI Studio Free Tier") {
-                apiKey = value;
-                break;
-            }
-        }
-    }
+    const apiKey = getApiKey('GROQ');
 
-    if (apiKey) {
-        apiKey = apiKey.replace(/["']/g, '').trim();
-    }
-
-    if (!apiKey || apiKey === "AI Studio Free Tier" || apiKey === "undefined") {
-      return res.status(500).json({ error: "Groq API Key is missing." });
+    if (!apiKey) {
+      return res.status(500).json({ error: "Groq API Key is missing. Please set GROQ_API_KEY in settings." });
     }
 
     const groq = new Groq({ apiKey });
 
-    // Fetch fresh products if needed
+    // Try to get fresh products if not provided
     let products = providedProducts || [];
     if (products.length === 0 && shop?.id && db) {
-       try {
-         const prodQ = query(collection(db, 'products'), where('shop_id', '==', shop.id), where('is_active', '==', true));
-         const prodSnap = await getDocs(prodQ);
-         products = prodSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-       } catch (e) {
-         console.error("Firebase fetch error in backend:", e);
-       }
+      try {
+        const prodSnap = await getDocs(query(collection(db, 'products'), where('shop_id', '==', shop.id), where('is_active', '==', true)));
+        products = prodSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      } catch (e) {
+        console.error("Firebase Fetch Error:", e);
+      }
     }
 
-    const productMenu = products.map((p: any) => `- ${p.name}: Rs. ${p.price} (ID: ${p.id}) ${p.image_url ? '[IMAGE:'+p.image_url+']' : ''}`).join('\n');
+    const productMenu = products.map((p: any) => `- ${p.name}: Rs. ${p.base_price || p.price} ${p.image_url ? '[IMAGE:'+p.image_url+']' : ''}`).join('\n');
     
-    const systemPrompt = `Aap ek helpful Pakistani AI sales assistant hain jiska naam "${shop?.shop_name} Bot" hai. Aap Roman Urdu mein baat karte hain.
-      Dukan ki maloomat:
-      - Shop Name: ${shop?.shop_name}
-      - Category: ${shop?.category}
-      - Currency: Rs.
-      - JazzCash Number: ${shop?.jazzcash_number}
-      - Delivery Charges: Rs. ${shop?.delivery_charges || 0}
-
+    const systemPrompt = `Aap ek helpful Pakistani AI sales assistant hain jiska naam "${shop?.shop_name} Bot" hai. 
+      Aap Roman Urdu mein baat karte hain.
+      Dukan: ${shop?.shop_name}
+      Category: ${shop?.category}
+      JazzCash: ${shop?.jazzcash_number}
+      Delivery: Rs. ${shop?.delivery_charges || 0}
+      
       Menu:
-      ${productMenu || 'Abhi koi products nahi hain.'}
+      ${productMenu || 'No products available.'}
 
-      Asli (Strict) Rules:
-      1. Sirf Roman Urdu mein baat karain.
-      2. Menu mein se hi items suggest karain.
-      3. Jab client order final karna chahay, "finalize_order" function call karain.
-      4. Customer se unka naam aur delivery address zaroor poocha karain.
-      5. Jab product ka zikr karain to exactly [IMAGE:url] ko message mein shamil karain agar URL available ho.`;
+      Rules:
+      1. Speak only Roman Urdu.
+      2. Recommend only from the menu.
+      3. Ask for name and delivery address.
+      4. Use [IMAGE:url] exactly when mentioning a product.
+      5. Finalize order when customer is ready.`;
 
     const messages = [
       { role: "system", content: systemPrompt },
@@ -148,15 +172,15 @@ router.post("/chat", async (req, res) => {
         type: 'function',
         function: {
           name: 'finalize_order',
-          description: 'Call this when the customer confirms their order, items, address and phone.',
+          description: 'Call when customer confirms details.',
           parameters: {
             type: 'object',
             properties: {
               customer_name: { type: 'string' },
               phone: { type: 'string' },
               address: { type: 'string' },
-              items_json: { type: 'string', description: 'List of items and quantities' },
-              total_amount: { type: 'number', description: 'Total amount including delivery' }
+              items_json: { type: 'string' },
+              total_amount: { type: 'number' }
             },
             required: ['customer_name', 'phone', 'address', 'items_json', 'total_amount']
           }
@@ -167,24 +191,21 @@ router.post("/chat", async (req, res) => {
     const response = completion.choices[0].message;
     let functionCallsResult = null;
 
-    if (response.tool_calls && response.tool_calls.length > 0) {
-       functionCallsResult = response.tool_calls.map(tc => ({
-         name: tc.function.name,
-         args: JSON.parse(tc.function.arguments)
-       }));
+    if (response.tool_calls) {
+      functionCallsResult = response.tool_calls.map(tc => ({
+        name: tc.function.name,
+        args: JSON.parse(tc.function.arguments)
+      }));
     }
 
-    res.json({
-      text: response.content || "",
-      functionCalls: functionCallsResult
-    });
+    res.json({ text: response.content || "", functionCalls: functionCallsResult });
   } catch (err: any) {
-    console.error("Groq Chat Error:", err);
-    res.status(500).json({ error: "Groq API Error: " + err.message });
+    console.error("Chat Error:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Router mounting
+// Mount router under both to handle direct hits and prefixed hits
 app.use("/api", router);
 app.use("/", router);
 
