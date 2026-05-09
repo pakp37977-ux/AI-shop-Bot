@@ -7,8 +7,18 @@ import { HfInference } from "@huggingface/inference";
 const app = express();
 app.use(express.json());
 
+const router = express.Router();
+
+// Health check
+router.get("/health", (req, res) => {
+  res.json({ status: "ok", env: {
+    has_groq: !!process.env.GROQ_API_KEY,
+    has_hf: !!process.env.HUGGINGFACE_TOKEN
+  }});
+});
+
 // API route for AI Image generation (using HuggingFace)
-app.post("/api/generate-image", async (req, res) => {
+router.post("/generate-image", async (req, res) => {
   try {
     const { productName, category } = req.body;
     let token = process.env.HUGGINGFACE_TOKEN;
@@ -53,7 +63,7 @@ app.post("/api/generate-image", async (req, res) => {
 });
 
 // API route for Chat (using Groq)
-app.post("/api/chat", async (req, res) => {
+router.post("/chat", async (req, res) => {
   let apiKey = process.env.GROQ_API_KEY;
   try {
     for (const [key, value] of Object.entries(process.env)) {
@@ -164,5 +174,8 @@ NEVER ask for payment yourself, the function call handles that UI.`;
     res.status(500).json({ error: "Groq API Error: " + err.message });
   }
 });
+
+app.use("/api", router);
+app.use("/", router);
 
 export default app;

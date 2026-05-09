@@ -54,8 +54,12 @@ export default function ChatBot({ shop, products, onClose }: Props) {
     });
 
     if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || res.statusText);
+        let errorMsg = res.statusText || `Error ${res.status}`;
+        try {
+          const errData = await res.json();
+          if (errData.error) errorMsg = errData.error;
+        } catch (e) {}
+        throw new Error(errorMsg);
     }
     
     return await res.json();

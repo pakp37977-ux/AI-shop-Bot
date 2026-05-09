@@ -7,7 +7,7 @@ async function startServer() {
   const PORT = 3000;
 
   // Use API routes exported from api/index.ts
-  app.use(apiRoutes);
+  app.use('/api', apiRoutes);
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
