@@ -82,6 +82,13 @@ export default function ChatBot({ shop, products, onClose }: Props) {
       const historyToSend = messages.filter(m => m.role === 'user' || m.role === 'model');
       const response = await callApi(userText, historyToSend);
       
+      // Sanitization: Remove tool leak patterns
+      let botText = response.text || "";
+      botText = botText.replace(/finalize_order>\{[\s\S]*?\}<\/function>/g, '');
+      botText = botText.replace(/finalize_order>\{[\s\S]*?\}/g, '');
+      botText = botText.replace(/<function>[\s\S]*?<\/function>/g, '');
+      botText = botText.trim();
+
       if (response.functionCalls && response.functionCalls.length > 0) {
         const call = response.functionCalls[0];
         if (call.name === 'finalize_order') {
@@ -89,10 +96,11 @@ export default function ChatBot({ shop, products, onClose }: Props) {
           setOrderDetails(args);
           setPaymentRequired(true);
           
-          setMessages(prev => [...prev, { role: 'model', text: 'Order confirm ho gaya hai. Payment options: JazzCash, Easypaisa, Bank Transfer, COD. Aap kaise pay karein ge?', functionCall: true}]);
+          const confirmationMsg = `${args.customer_name} Sahab, aapka order final hai. Total Rs. ${args.total_amount} ki payment JazzCash se karein. QR neeche hai.`;
+          setMessages(prev => [...prev, { role: 'model', text: botText || confirmationMsg, functionCall: true}]);
         }
       } else {
-        setMessages(prev => [...prev, { role: 'model', text: response.text }]);
+        setMessages(prev => [...prev, { role: 'model', text: botText }]);
       }
     } catch (err: any) {
       console.error('Chat error details:', err);

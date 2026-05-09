@@ -159,6 +159,7 @@ Rules (FAALTO BAAT NAHI KAREN, PROFESSIONAL RAHEN):
 8. Naam aur delivery address poochain agar order confirm karna hai.
 9. Product mention karte waqt "[IMAGE:url]" lazmi lagain.
 10. Order final ho toh "finalize_order" tool call karain.
+11. CRITICAL: Tool call ko text message ke andar repeat mat karain. Tool call sirf background mein honi chahiye.
 
 Shop Details:
 - JazzCash: ${shop?.jazzcash_number}
