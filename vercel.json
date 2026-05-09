@@ -1,6 +1,18 @@
 {
   "rewrites": [
     {
+      "source": "/api/chat",
+      "destination": "/api/index.ts"
+    },
+    {
+      "source": "/api/generate-image",
+      "destination": "/api/index.ts"
+    },
+    {
+      "source": "/api/health",
+      "destination": "/api/index.ts"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/index.ts"
     },

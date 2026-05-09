@@ -1,180 +1,190 @@
 import express from "express";
+import { initializeApp, getApp, getApps } from 'firebase/app';
+import { getFirestore, collection, query, where, getDocs } from 'firebase/firestore';
 import Groq from "groq-sdk";
-import { collection, query, where, getDocs } from "firebase/firestore";
-import { db } from "../src/lib/firebase";
 import { HfInference } from "@huggingface/inference";
+import firebaseConfig from '../firebase-applet-config.json';
 
 const app = express();
 app.use(express.json());
 
+// Initialize Firebase in serverless context safely
+let db: any;
+try {
+  const firebaseApp = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+  db = getFirestore(firebaseApp, (firebaseConfig as any).firestoreDatabaseId);
+} catch (e) {
+  console.error("Firebase init error in API:", e);
+}
+
 const router = express.Router();
 
-// Health check
+// Health check with debugging info
 router.get("/health", (req, res) => {
-  res.json({ status: "ok", env: {
-    has_groq: !!process.env.GROQ_API_KEY,
-    has_hf: !!process.env.HUGGINGFACE_TOKEN
-  }});
+  res.json({ 
+    status: "ok", 
+    timestamp: new Date().toISOString(),
+    env: {
+      has_groq: !!(process.env.GROQ_API_KEY || process.env.VITE_GROQ_API_KEY),
+      has_hf: !!(process.env.HUGGINGFACE_TOKEN || process.env.VITE_HUGGINGFACE_TOKEN)
+    }
+  });
 });
 
-// API route for AI Image generation (using HuggingFace)
+// API route for AI Image generation
 router.post("/generate-image", async (req, res) => {
   try {
     const { productName, category } = req.body;
-    let token = process.env.HUGGINGFACE_TOKEN;
+    let token = process.env.HUGGINGFACE_TOKEN || process.env.VITE_HUGGINGFACE_TOKEN;
     
-    for (const [key, value] of Object.entries(process.env)) {
-      if (key.toLowerCase().includes('huggingface') && value && value !== "AI Studio Free Tier") {
-        token = value;
-        break;
-      }
-    }
-    
-    if (token) {
-      token = token.replace(/["']/g, '').trim();
-    }
-    
+    // Search for any key containing huggingface if the standard one is missing
     if (!token || token === "AI Studio Free Tier") {
-      return res.status(500).json({ error: "Missing HUGGINGFACE_TOKEN in Secrets" });
+        for (const [key, value] of Object.entries(process.env)) {
+            if (key.toLowerCase().includes('huggingface') && value && value !== "AI Studio Free Tier") {
+                token = value;
+                break;
+            }
+        }
+    }
+
+    if (token) {
+        token = token.replace(/["']/g, '').trim();
+    }
+
+    if (!token || token === "AI Studio Free Tier" || token === "undefined") {
+      return res.status(500).json({ error: "HuggingFace Token is missing." });
     }
 
     const hf = new HfInference(token);
-    const prompt = `Professional food photography of ${productName}, ${category || 'Pakistani cuisine'}, on white ceramic plate, restaurant studio lighting, appetizing, highly detailed, 8k, no text`;
-
+    const prompt = `Hyper-realistic, high-quality professional product food photography of ${productName} ${category ? "in " + category : ""}. trending on instagram, appetizing, studio lighting, bokeh background.`;
+    
     const imageBlob = await hf.textToImage({
-      model: "stabilityai/stable-diffusion-xl-base-1.0",
+      model: 'black-forest-labs/FLUX.1-dev',
       inputs: prompt,
       parameters: {
-        negative_prompt: "blurry, low quality, text, logo, watermark",
-        num_inference_steps: 25,
-        guidance_scale: 7.5
+        negative_prompt: 'deformed, blurry, bad anatomy, text, watermark, low quality',
       }
     });
 
     const imageBuffer = await (imageBlob as unknown as Blob).arrayBuffer();
-    const buffer = Buffer.from(imageBuffer);
-    const base64Image = `data:image/png;base64,${buffer.toString('base64')}`;
+    const base64Image = Buffer.from(imageBuffer).toString('base64');
+    const imageUrl = `data:image/jpeg;base64,${base64Image}`;
 
-    res.json({ imageUrl: base64Image });
+    res.json({ imageUrl });
   } catch (err: any) {
     console.error("AI Image Generation Error:", err);
-    res.status(500).json({ error: err.message || "Image generation failed" });
+    res.status(500).json({ error: "Image generation failed: " + err.message });
   }
 });
 
 // API route for Chat (using Groq)
 router.post("/chat", async (req, res) => {
-  let apiKey = process.env.GROQ_API_KEY;
   try {
-    for (const [key, value] of Object.entries(process.env)) {
-      if (key.toLowerCase().includes('groq') && value && value !== "AI Studio Free Tier") {
-        apiKey = value;
-        break;
-      }
+    const { message, history, shop, products: providedProducts } = req.body;
+    
+    let apiKey = process.env.GROQ_API_KEY || process.env.VITE_GROQ_API_KEY;
+    if (!apiKey || apiKey === "AI Studio Free Tier") {
+        for (const [key, value] of Object.entries(process.env)) {
+            if (key.toLowerCase().includes('groq') && value && value !== "AI Studio Free Tier") {
+                apiKey = value;
+                break;
+            }
+        }
     }
 
     if (apiKey) {
-       apiKey = apiKey.replace(/["']/g, '').trim();
-    }
-    if (!apiKey || apiKey === "AI Studio Free Tier") {
-      return res.status(500).json({ error: "Server missing valid GROQ_API_KEY. Please add it to Secrets." });
+        apiKey = apiKey.replace(/["']/g, '').trim();
     }
 
-    const { message, history, shop } = req.body;
-    
-    let products = [];
-    if (shop?.id) {
+    if (!apiKey || apiKey === "AI Studio Free Tier" || apiKey === "undefined") {
+      return res.status(500).json({ error: "Groq API Key is missing." });
+    }
+
+    const groq = new Groq({ apiKey });
+
+    // Fetch fresh products if needed
+    let products = providedProducts || [];
+    if (products.length === 0 && shop?.id && db) {
        try {
          const prodQ = query(collection(db, 'products'), where('shop_id', '==', shop.id), where('is_active', '==', true));
          const prodSnap = await getDocs(prodQ);
          products = prodSnap.docs.map(d => ({ id: d.id, ...d.data() }));
        } catch (e) {
-         console.error("Error fetching secure products menu:", e);
+         console.error("Firebase fetch error in backend:", e);
        }
     }
 
-    const groq = new Groq({ apiKey });
+    const productMenu = products.map((p: any) => `- ${p.name}: Rs. ${p.price} (ID: ${p.id}) ${p.image_url ? '[IMAGE:'+p.image_url+']' : ''}`).join('\n');
+    
+    const systemPrompt = `Aap ek helpful Pakistani AI sales assistant hain jiska naam "${shop?.shop_name} Bot" hai. Aap Roman Urdu mein baat karte hain.
+      Dukan ki maloomat:
+      - Shop Name: ${shop?.shop_name}
+      - Category: ${shop?.category}
+      - Currency: Rs.
+      - JazzCash Number: ${shop?.jazzcash_number}
+      - Delivery Charges: Rs. ${shop?.delivery_charges || 0}
 
-    const systemPrompt = `You are a desi shop assistant for "${shop.shop_name}".
-Respond ONLY in Roman Urdu. Keep replies very short, friendly, and desi.
-Your job is to take food orders. If they ask what's available, tell them the menu.
-Delivery Charges: Rs. ${shop.delivery_charges}
+      Menu:
+      ${productMenu || 'Abhi koi products nahi hain.'}
 
-Real Menu: ${JSON.stringify(products)}.
-Only sell these items from the Real Menu. Never make up prices or items. If customer asks for something not in the menu, say 'Maazrat ye nahi hai'.
-When showing the menu to the user, include the product images if they exist using the format: [IMAGE: url] before the item name. 
-Example: 
-Ye raha menu:
-[IMAGE: url1] 1. Pizza - 577
-[IMAGE: url2] 2. Biryani - 300
+      Asli (Strict) Rules:
+      1. Sirf Roman Urdu mein baat karain.
+      2. Menu mein se hi items suggest karain.
+      3. Jab client order final karna chahay, "finalize_order" function call karain.
+      4. Customer se unka naam aur delivery address zaroor poocha karain.
+      5. Jab product ka zikr karain to exactly [IMAGE:url] ko message mein shamil karain agar URL available ho.`;
 
-Once they finalize the order, ask for their Name, Phone number, and Address. 
-When you have all 3 details (name, phone, address) AND their final items, call the 'finalize_order' function with the data. 
-NEVER ask for payment yourself, the function call handles that UI.`;
-
-    const formattedHistory = (history || []).map((msg: any) => ({
-      role: msg.role === 'model' ? 'assistant' : 'user',
-      content: msg.text || ""
-    }));
+    const messages = [
+      { role: "system", content: systemPrompt },
+      ...(history || []).map((m: any) => ({ role: m.role === 'model' ? 'assistant' : 'user', content: m.text })),
+      { role: "user", content: message }
+    ];
 
     const completion = await groq.chat.completions.create({
       model: 'llama-3.1-8b-instant',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...formattedHistory,
-        { role: 'user', content: message }
-      ],
+      messages,
       temperature: 0.2,
       tools: [{
-        type: "function",
+        type: 'function',
         function: {
-          name: "finalize_order",
-          description: "Call this ONLY when the user has provided their Name, Phone, Address, and finalized the items they want to order.",
+          name: 'finalize_order',
+          description: 'Call this when the customer confirms their order, items, address and phone.',
           parameters: {
-            type: "object",
+            type: 'object',
             properties: {
-              customer_name: { type: "string" },
-              phone: { type: "string" },
-              address: { type: "string" },
-              items_json: { type: "string", description: "A summary string of items ordered" },
-              total_amount: { type: "number", description: "Total price of items PLUS delivery charges" }
+              customer_name: { type: 'string' },
+              phone: { type: 'string' },
+              address: { type: 'string' },
+              items_json: { type: 'string', description: 'List of items and quantities' },
+              total_amount: { type: 'number', description: 'Total amount including delivery' }
             },
-            required: ["customer_name", "phone", "address", "items_json", "total_amount"]
+            required: ['customer_name', 'phone', 'address', 'items_json', 'total_amount']
           }
         }
-      }],
-      tool_choice: "auto",
-      max_tokens: 500
+      }]
     });
-    
-    const messageObj = completion.choices[0]?.message;
+
+    const response = completion.choices[0].message;
     let functionCallsResult = null;
 
-    if (messageObj?.tool_calls && messageObj.tool_calls.length > 0) {
-       const tc = messageObj.tool_calls[0].function;
-       if (tc.name === 'finalize_order') {
-          try {
-             const args = JSON.parse(tc.arguments);
-             functionCallsResult = [{
-               name: tc.name,
-               args: args
-             }];
-          } catch (e) {
-             console.error("Error parsing tool arguments", e);
-          }
-       }
+    if (response.tool_calls && response.tool_calls.length > 0) {
+       functionCallsResult = response.tool_calls.map(tc => ({
+         name: tc.function.name,
+         args: JSON.parse(tc.function.arguments)
+       }));
     }
 
     res.json({
-      text: messageObj?.content || "",
+      text: response.content || "",
       functionCalls: functionCallsResult
     });
   } catch (err: any) {
-    console.error(err);
+    console.error("Groq Chat Error:", err);
     res.status(500).json({ error: "Groq API Error: " + err.message });
   }
 });
 
+// Router mounting
 app.use("/api", router);
 app.use("/", router);
 
