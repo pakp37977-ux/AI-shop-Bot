@@ -36,7 +36,7 @@ export default function ChatBot({ shop, products, onClose }: Props) {
       setMessages([{ role: 'model', text: 'Maazrat dukan band hai. Hum abhi order nahi le saktay.' }]);
       return;
     }
-    setMessages([{ role: 'model', text: shop.welcome_msg }]);
+    setMessages([{ role: 'model', text: 'Assalam-o-Alaikum Sir, aap kya order karein ge?' }]);
   }, [shop, products]);
 
   const callApi = async (messageContent: any, currentHistory: any[]) => {
@@ -89,7 +89,7 @@ export default function ChatBot({ shop, products, onClose }: Props) {
           setOrderDetails(args);
           setPaymentRequired(true);
           
-          setMessages(prev => [...prev, { role: 'model', text: 'Order confirm ho gaya hai! Neechay payment kar dain.', functionCall: true}]);
+          setMessages(prev => [...prev, { role: 'model', text: 'Order confirm ho gaya hai. Payment options: JazzCash, Easypaisa, Bank Transfer, COD. Aap kaise pay karein ge?', functionCall: true}]);
         }
       } else {
         setMessages(prev => [...prev, { role: 'model', text: response.text }]);
@@ -98,12 +98,12 @@ export default function ChatBot({ shop, products, onClose }: Props) {
       console.error('Chat error details:', err);
       const errorMessage = err.message || 'Dobara try kijiye.';
       
-      let desiError = 'Oops, network masla. ' + errorMessage;
+      let desiError = 'Network masla. ' + errorMessage;
       
       if (errorMessage.includes('403') || errorMessage.includes('denied access')) {
-         desiError = "Maazrat! Aapki API Key block ho chuki hai (Error 403). Baraye meharbani Groq console se aik Nayi API Key banayein aur Secrets mein paste karain.";
+         desiError = "Maazrat! API Key block ho chuki hai (Error 403). Groq console se Nayi API Key banayein.";
       } else if (errorMessage.includes('API key not valid')) {
-         desiError = "API Key galat hai. Secrets mein GROQ_API_KEY theek se dalein.";
+         desiError = "API Key galat hai. GROQ_API_KEY theek se dalein.";
       }
 
       setMessages(prev => [...prev, { role: 'model', text: desiError }]);
@@ -295,7 +295,7 @@ export default function ChatBot({ shop, products, onClose }: Props) {
             <input 
               type="text" 
               className="flex-1 bg-transparent py-3 outline-none text-sm text-gray-900"
-              placeholder={shop.is_open ? "Type your message..." : "Shop is closed"}
+              placeholder={shop.is_open ? "Kya order karein ge, Sir?" : "Maazrat, dukan band hai"}
               value={input}
               onChange={e => setInput(e.target.value)}
               disabled={!shop.is_open || paymentRequired || loading}

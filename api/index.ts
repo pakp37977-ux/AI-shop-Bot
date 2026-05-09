@@ -119,10 +119,12 @@ router.post("/generate-image", async (req, res) => {
 // Chat Bot
 router.post("/chat", async (req, res) => {
   try {
+    console.log("Chat request received");
     const { message, history, shop, products: providedProducts } = req.body;
     const apiKey = getApiKey('GROQ');
 
     if (!apiKey) {
+      console.error("Groq key missing");
       return res.status(500).json({ error: "Groq API Key is missing. Please set GROQ_API_KEY in settings." });
     }
 
@@ -132,6 +134,7 @@ router.post("/chat", async (req, res) => {
     let products = providedProducts || [];
     if (products.length === 0 && shop?.id && db) {
       try {
+        console.log("Fetching fresh products from Firebase");
         const prodSnap = await getDocs(query(collection(db, 'products'), where('shop_id', '==', shop.id), where('is_active', '==', true)));
         products = prodSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       } catch (e) {
@@ -141,22 +144,29 @@ router.post("/chat", async (req, res) => {
 
     const productMenu = products.map((p: any) => `- ${p.name}: Rs. ${p.base_price || p.price} ${p.image_url ? '[IMAGE:'+p.image_url+']' : ''}`).join('\n');
     
-    const systemPrompt = `Aap ek helpful Pakistani AI sales assistant hain jiska naam "${shop?.shop_name} Bot" hai. 
-      Aap Roman Urdu mein baat karte hain.
-      Dukan: ${shop?.shop_name}
-      Category: ${shop?.category}
-      JazzCash: ${shop?.jazzcash_number}
-      Delivery: Rs. ${shop?.delivery_charges || 0}
-      
-      Menu:
-      ${productMenu || 'No products available.'}
+    console.log("Constructing system prompt");
+    const systemPrompt = `Aap Shan Bhai hain, "${shop?.shop_name}" ke maalik (owner).
+Aap AI nahi hain, Pakistani shopkeeper hain.
 
-      Rules:
-      1. Speak only Roman Urdu.
-      2. Recommend only from the menu.
-      3. Ask for name and delivery address.
-      4. Use [IMAGE:url] exactly when mentioning a product.
-      5. Finalize order when customer is ready.`;
+Rules (FAALTO BAAT NAHI KAREN, PROFESSIONAL RAHEN):
+1. Sirf Roman Urdu mein baat karain.
+2. Tone: Professional shopkeeper. Casual words jaise "yaar", "bhai", "Jinga Lala" ka istemal SAKHT MANA HAI. Hamesha "Sir" keh kar mukhatib karain.
+3. Greeting: Sirf "Assalam-o-Alaikum", "Walaikum Assalam", ya "Salaam" ka istemal karain. Namaste ya koi aur aisi greeting KABHI NAHI use karni.
+4. "Assalam-o-Alaikum" aur "Walaikum Assalam" ke spelling aur tareeqay ka khaas khayal rakhain.
+5. First greeting: "Assalam-o-Alaikum Sir, aap kya order karein ge?"
+6. Agar koi "Hi" ya "Hello" bole: "Sir aap kya order kerna chahte hain? Chicken, Biryani, Pizza, Burger ya kuch aur?"
+7. Payment Options: Sirf ye batayein: "Payment options: JazzCash, Easypaisa, Bank Transfer, COD. Aap kaise pay karein ge?"
+8. Naam aur delivery address poochain agar order confirm karna hai.
+9. Product mention karte waqt "[IMAGE:url]" lazmi lagain.
+10. Order final ho toh "finalize_order" tool call karain.
+
+Shop Details:
+- JazzCash: ${shop?.jazzcash_number}
+- Delivery Charges: Rs. ${shop?.delivery_charges || 0}
+
+Menu:
+${productMenu || 'Filhal menu mein kuch nahi hai.'}
+`;
 
     const messages = [
       { role: "system", content: systemPrompt },
@@ -164,10 +174,11 @@ router.post("/chat", async (req, res) => {
       { role: "user", content: message }
     ];
 
+    console.log("Sending request to Groq");
     const completion = await groq.chat.completions.create({
       model: 'llama-3.1-8b-instant',
       messages,
-      temperature: 0.2,
+      temperature: 0.7, // Personality ke liye temperature barha diya
       tools: [{
         type: 'function',
         function: {
@@ -187,6 +198,7 @@ router.post("/chat", async (req, res) => {
         }
       }]
     });
+    console.log("Groq responded");
 
     const response = completion.choices[0].message;
     let functionCallsResult = null;
