@@ -8,6 +8,7 @@ export default function DashboardSettings() {
   const [shopName, setShopName] = useState('');
   const [slug, setSlug] = useState('');
   const [jazzcash, setJazzcash] = useState('');
+  const [easypaisa, setEasypaisa] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
   const [delivery, setDelivery] = useState('');
   const [welcomeMsg, setWelcomeMsg] = useState('');
@@ -36,6 +37,7 @@ export default function DashboardSettings() {
           setShopName(d.shop_name || '');
           setSlug(d.slug || '');
           setJazzcash(d.jazzcash_number || '');
+          setEasypaisa(d.easypaisa_number || '');
           setWhatsapp(d.owner_whatsapp || '');
           setDelivery(d.delivery_charges?.toString() || '0');
           setWelcomeMsg(d.welcome_msg || '');
@@ -112,6 +114,7 @@ export default function DashboardSettings() {
         slug: slug,
         logo_url: newLogoUrl,
         jazzcash_number: jazzcash,
+        easypaisa_number: easypaisa,
         owner_whatsapp: whatsapp,
         delivery_charges: Number(delivery),
         welcome_msg: welcomeMsg,
@@ -187,6 +190,10 @@ export default function DashboardSettings() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">JazzCash Mobile Number</label>
             <input type="text" className="w-full px-4 py-2 border rounded-md" value={jazzcash} onChange={e => setJazzcash(e.target.value)} placeholder="e.g. 03001234567" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Easypaisa Mobile Number</label>
+            <input type="text" className="w-full px-4 py-2 border rounded-md" value={easypaisa} onChange={e => setEasypaisa(e.target.value)} placeholder="e.g. 03001234567" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Delivery Charges (Rs.)</label>

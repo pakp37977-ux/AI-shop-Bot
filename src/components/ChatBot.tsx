@@ -24,6 +24,7 @@ export default function ChatBot({ shop, products, onClose }: Props) {
   const [uploading, setUploading] = useState(false);
   const [orderComplete, setOrderComplete] = useState(false);
   const [waLink, setWaLink] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<'jazzcash' | 'easypaisa'>('jazzcash');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -82,25 +83,59 @@ export default function ChatBot({ shop, products, onClose }: Props) {
       const historyToSend = messages.filter(m => m.role === 'user' || m.role === 'model');
       const response = await callApi(userText, historyToSend);
       
-      // Sanitization: Remove tool leak patterns
+      // Robust Sanitization: Filter out ANY internal tool call patterns or JSON leftovers
       let botText = response.text || "";
-      botText = botText.replace(/finalize_order>\{[\s\S]*?\}<\/function>/g, '');
-      botText = botText.replace(/finalize_order>\{[\s\S]*?\}/g, '');
-      botText = botText.replace(/<function>[\s\S]*?<\/function>/g, '');
-      botText = botText.trim();
+      
+      // Attempt manual extraction if functionCalls is missing but text looks like it has a call
+      let manualCall = null;
+      if (!response.functionCalls || response.functionCalls.length === 0) {
+        const manualMatch = botText.match(/finalize_order\s*(\{[\s\S]*?\})/i);
+        if (manualMatch && manualMatch[1]) {
+          try {
+            manualCall = {
+              name: 'finalize_order',
+              args: JSON.parse(manualMatch[1])
+            };
+          } catch (e) {
+            console.warn("Found manual finalize_order but failed to parse JSON", e);
+          }
+        }
+      }
 
-      if (response.functionCalls && response.functionCalls.length > 0) {
-        const call = response.functionCalls[0];
+      // Remove common LLM leak patterns for tool calls (aggressive)
+      botText = botText.replace(/finalize_order\s*\{[\s\S]*?\}/gi, '');
+      botText = botText.replace(/finalize_order>[\s\S]*?<\/function>/gi, '');
+      botText = botText.replace(/finalize_order>[\s\S]*?}/gi, '');
+      botText = botText.replace(/<function>[\s\S]*?<\/function>/gi, '');
+      botText = botText.replace(/```json[\s\S]*?```/gi, '');
+      botText = botText.replace(/\{"customer_name":[\s\S]*?\}/gi, '');
+      
+      // Final trim and whitespace cleanup
+      botText = botText.replace(/\s+/g, ' ').trim();
+
+      const activeFunctionCalls = response.functionCalls && response.functionCalls.length > 0 
+        ? response.functionCalls 
+        : (manualCall ? [manualCall] : null);
+
+      if (activeFunctionCalls && activeFunctionCalls.length > 0) {
+        const call = activeFunctionCalls[0];
         if (call.name === 'finalize_order') {
           const args = call.args as any;
           setOrderDetails(args);
           setPaymentRequired(true);
           
-          const confirmationMsg = `${args.customer_name} Sahab, aapka order final hai. Total Rs. ${args.total_amount} ki payment JazzCash se karein. QR neeche hai.`;
-          setMessages(prev => [...prev, { role: 'model', text: botText || confirmationMsg, functionCall: true}]);
+          // Always use a clean synthesized message when a tool call happens to prevent ANY leaks
+          const finalMessage = `${args.customer_name} Sahab, aapka order confirm ho gaya hai. Total Rs. ${args.total_amount} ki payment JazzCash ya Easypaisa se karein. Payment details neechay di gayi hain.`;
+          setMessages(prev => [...prev, { role: 'model', text: finalMessage, functionCall: true}]);
         }
       } else {
-        setMessages(prev => [...prev, { role: 'model', text: botText }]);
+        // Only add message if it's not empty after cleaning
+        if (botText) {
+          setMessages(prev => [...prev, { role: 'model', text: botText }]);
+        } else if (!response.functionCalls) {
+          // Fallback if somehow everything was cleaned out and no function call happened
+          setMessages(prev => [...prev, { role: 'model', text: "G janab? Main aapki kiya madad kar sakta hoon?" }]);
+        }
       }
     } catch (err: any) {
       console.error('Chat error details:', err);
@@ -241,12 +276,36 @@ export default function ChatBot({ shop, products, onClose }: Props) {
           {/* Payment Modal inside Chat */}
           {paymentRequired && !orderComplete && shop.is_open && (
             <div className="bg-white border rounded-xl p-5 shadow-sm mt-2 flex flex-col items-center animate-in fade-in">
-              <h4 className="font-bold text-gray-900 mb-1">Pay via JazzCash</h4>
-              <p className="text-sm text-gray-500 mb-4 block text-center">Scan QR or send to: <br/> <strong className="text-gray-900">{shop.jazzcash_number || 'N/A'}</strong></p>
+              <div className="flex w-full gap-2 mb-4">
+                <button 
+                  onClick={() => setPaymentMethod('jazzcash')}
+                  className={`flex-1 py-2 text-xs font-bold rounded-lg border transition-all ${paymentMethod === 'jazzcash' ? 'bg-red-50 border-red-600 text-red-600 shadow-sm' : 'bg-gray-50 border-gray-200 text-gray-500'}`}
+                >
+                  JazzCash
+                </button>
+                <button 
+                  onClick={() => setPaymentMethod('easypaisa')}
+                  className={`flex-1 py-2 text-xs font-bold rounded-lg border transition-all ${paymentMethod === 'easypaisa' ? 'bg-green-50 border-green-600 text-green-600 shadow-sm' : 'bg-gray-50 border-gray-200 text-gray-500'}`}
+                >
+                  Easypaisa
+                </button>
+              </div>
+
+              <h4 className="font-bold text-gray-900 mb-1">
+                Pay via {paymentMethod === 'jazzcash' ? 'JazzCash' : 'Easypaisa'}
+              </h4>
+              <p className="text-sm text-gray-500 mb-4 block text-center">
+                Scan QR or send to: <br/> 
+                <strong className="text-gray-900">
+                  {paymentMethod === 'jazzcash' ? (shop.jazzcash_number || 'N/A') : (shop.easypaisa_number || 'N/A')}
+                </strong>
+              </p>
               
-              <div className="bg-white p-2 rounded-lg border-2 border-red-500 mb-4 shadow-sm inline-block">
-                {/* Always make sure value is valid before rendering QR to avoid crasehs */}
-                 <QRCodeSVG value={`jazzcash://${shop.jazzcash_number}?amount=${orderDetails.total_amount}`} size={160} />
+              <div className={`bg-white p-2 rounded-lg border-2 ${paymentMethod === 'jazzcash' ? 'border-red-500' : 'border-green-500'} mb-4 shadow-sm inline-block`}>
+                 <QRCodeSVG 
+                   value={`${paymentMethod === 'jazzcash' ? 'jazzcash' : 'easypaisa'}://${paymentMethod === 'jazzcash' ? shop.jazzcash_number : shop.easypaisa_number}?amount=${orderDetails.total_amount}`} 
+                   size={160} 
+                 />
               </div>
 
               <div className="bg-gray-50 w-full p-3 rounded-lg flex items-center justify-between mb-4">

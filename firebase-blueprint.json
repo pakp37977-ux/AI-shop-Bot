@@ -10,6 +10,7 @@
         "slug": { "type": "string" },
         "logo_url": { "type": "string" },
         "jazzcash_number": { "type": "string" },
+        "easypaisa_number": { "type": "string" },
         "owner_whatsapp": { "type": "string" },
         "delivery_charges": { "type": "number" },
         "welcome_msg": { "type": "string" },
